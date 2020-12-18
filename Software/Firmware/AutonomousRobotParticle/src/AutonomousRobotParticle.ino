@@ -30,6 +30,14 @@
  *	back to the app when the robot is in AUTO mode.
  *  
  *	by: Bob Glicksman, Jim Schrempp, Team Practical Projects
+ *		version 3.16 12/11/2020
+ *			When blocked front robot enters "avoid front" mode. It will pivot in a 
+ *			direction until the front is clear, or the FRONTBLOCKED_LIMIT_MS is exceeded
+ *		version 3.15 12/4/2020
+ *			When blocked front but clear both sides, robot makes a significant pivot
+ *		version 3.14 11/9/2020
+ *			set distance timeout to 4ms (about 2 feet)
+ *			added delay of 1000 microseconds before each measurement - reduce crosstalk
  *		version 3.13 11/4/2020
  *			Cleaned up variable name. Added cmd: to some messages.
  * 		version 3.12 11/3/2020
@@ -96,7 +104,7 @@
 // Set the system mode to semi-automatic so that the robot will ruyn even if there is no Wi-Fi
 SYSTEM_MODE(SEMI_AUTOMATIC);
 
-#define version 3.10
+#define version 3.16
 
 // Global constants
 	// motor speeds
@@ -121,7 +129,7 @@ const float OBSTRUCTION_CLOSE_DISTANCE = 8.0; // distance (inches) that is too c
 const float TOO_CLOSE_SIDE = 4.0; // distance (inches) that is too close to a side (left/right) sensor; must stop and turn
 const float CLEAR_AHEAD = 12.0; // minimum distance (inches) for robot to be OK to move ahead
 //const float NEAR_SIDE = 8.0; // UNUSED  distance (inches) that is so close to a side we will turn while moving.
-const unsigned int TIMEOUT = 20;  // max measurement time is 20 ms or about 11 feet.
+const unsigned int TIMEOUT = 4;  // max measurement time is 4 ms or about 2 feet.
 
 	// robot command modes from app
 const int NO_COMMAND = -1;
@@ -247,8 +255,8 @@ void setup() {
 void loop() {
   
 	static int currentMode = MANUAL_MODE;  // place in manual mode until commanded otherwise
-	static bool avoidFrontMode = false;
-	static long frontIsClearAtMS = 0;
+	static bool avoidFrontMode = false;   // when the front is first blocked, this gets set true
+	static long frontIsClearAtMS = 0;     // this will be the MS of the last time we found the front clear
 
 	int commandFromBT = 0;
 
@@ -275,8 +283,11 @@ void loop() {
 	// process automonomous mode
 	if(currentMode == AUTO){
 
-		static int spinDirection = -1;
+		static int spinDirection = -1; // If the robot decides to spin to avoid a front
+									   // wall, we want to keep spinning in the same direction
+									   // and not oscillate back and forth.
 
+		// step 1 -------------------------
 		// Take measurements
 		leftDistance = measureDistance(LEFT); // take ultrasonic range measurement left
 		rightDistance = measureDistance(RIGHT); // take ultrasonic range measurement right
@@ -290,6 +301,7 @@ void loop() {
 		digitalWrite(LEDpin, LEDStatus);
 		LEDStatus = ! LEDStatus;
 
+		// step 2 -------------------------
 		// decide if we are close on any sensor
 		bool leftSideClear = true;
 		bool rightSideClear = true;
@@ -305,22 +317,36 @@ void loop() {
 			frontClear =  false;
 		}
 
-		// if front is clear, note that
+		// if front is clear, note it.
 		if (frontClear) {
 			frontIsClearAtMS = millis();
 			avoidFrontMode = false; // reset avoidance becasue we're running now
 		} 
 
-		// if front has been blocked continuously, then give up
+		// step 3 -------------------------
+		// Decide what action to take
+
 		if (millis() - frontIsClearAtMS > FRONTBLOCKED_LIMIT_MS) {
+			// front has been blocked continuously, so we give up
 
 			robotStop();
 			reportAction("Front blocked time exceeded");
 			currentMode = MANUAL_MODE;
 
+		} else if (avoidFrontMode) {
+			// we are in avoid mode and will continue to pivot in one direction
+
+			reportAction("Avoid front mode, scanning"); 
+			for (int i=0; i<4; i++) {   
+				pivotAway(spinDirection);
+			}
+			//robotStop(); // without this the pivot continues
+
 		} else {
 
-			// Handle the sensor combinations
+			// we have not been blocked and we are in avoid front mode, so 
+			// decide what to do based on the sensors.
+			// Handle the sensor combinations to decide what to do
 
 			if (leftSideClear && frontClear && rightSideClear) {
 				// side and ahead are clear
@@ -338,12 +364,12 @@ void loop() {
 			else if (leftSideClear && !frontClear && rightSideClear) {
 				// front too close, sides open, spin some way
 
-				String actionMsg = "Avoid front with same spin ";
+				String actionMsg = "Avoid front with same pivot ";
 
 				if (!avoidFrontMode) { 
 					// first time after hitting front blocked with sides clear
 					avoidFrontMode = true ;  // will be set to false when it is clear forward
-					actionMsg = "Avoid front with spin:  ";
+					actionMsg = "Avoid front with pivot:  ";
 
 					// pick a direction
 					float randomDirection = random(2);
@@ -358,7 +384,10 @@ void loop() {
 				}
 
 				reportAction(actionMsg); 
-				pivotAway(spinDirection);
+				for (int i=0; i<4; i++) {
+					pivotAway(spinDirection);
+				}
+				robotStop(); // without this the pivot continues
 
 			}
 
@@ -603,7 +632,7 @@ float measureDistance(int direction){
 
 		// Clear the trigger pin
 		srWrite(pinToSense, 0);
-		delayMicroseconds(2);
+		delayMicroseconds(1000);  // need this to prevent sensor cross talk giving spurious readings
     
 		// Set the trigger pin HIGH for 10 micro seconds
 		srWrite(pinToSense, 1);
@@ -633,6 +662,7 @@ float measureDistance(int direction){
 
 // function to pivot robot to avoid an obstacle
 //	direction 0:pivotleft   1:pivotright
+//  uses a delay to make the pivot significant
 void pivotAway(int direction) {
 	switch (direction) {
 		case 0:
@@ -652,17 +682,19 @@ void pivotAway(int direction) {
 ***************************************************************************/
 
 // function to pivot robot right
+// uses delay of 150
+// does not stop
 void robotPivotRight() {
 	robotRight(SLOW_SPEED);
 	delay(150);
-	//robotStop();
 }
 
 // function to pivot robot left
+// uses delay of 150
+// does not stop
 void robotPivotLeft() {
 	robotLeft(SLOW_SPEED);
     delay(150);
-	//robotStop();
 }
 
 // function to move robot forward at commanded speed
