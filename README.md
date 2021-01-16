@@ -85,7 +85,7 @@ small height transitions and on plush surfaces.
 We have documented the robot's behavior in autonomous navigation mode (AUTO) in a series of six videos that 
 you can view, beginning here:
 
-https://www.youtube.com/watch?v=S9v4ddf_cKs&list=PLz4TQp3CqyALdgTUBRFCJkOn_9tXRT2St
+https://www.youtube.com/watch?v=kkOf_IVwo8o&list=PLz4TQp3CqyALdgTUBRFCJkOn_9tXRT2St
 
 In addition to autonomous mode, the Robot can be manually steered via the app supplied with this project.
 
